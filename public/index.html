@@ -2,65 +2,108 @@
 <head>
     <title>Socket.IO chat</title>
     <style>
+    .hidden{
+      display:none !important;
+    }
       * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
       }
       body,html {
+        background:#000;
         font: 13px Helvetica, Arial;
         height:100%;
         width:100%;
+        overflow:hidden;
       }
-      form {
-        background: #000;
-         padding: 3px;
-         position: fixed;
-         bottom: 0;
-         width: 100%;
-      }
-      form input {
-        border: 0;
-        padding: 10px;
-        width: 90%;
-        margin-right: .5%;
-      }
-      form button {
-       width: 9%;
-       background: rgb(130, 224, 255);
-       border: none;
-       padding: 10px;
-     }
-      #messages {
-       list-style-type: none;
-        margin: 0;
-        padding: 0;
-      }
-      #messages li {
-         padding: 5px 10px;
-       }
-      #messages li:nth-child(odd) {
-       background: #eee;
-      }
-      #vid{
+      #vidcontainer, #vid{
         width:100%;
         height:100%;
         max-height:100%;
         max-width:100%;
       }
+      #admin {
+        background: rgba(0,0,0,0.5);
+        opacity: 0;
+        position: fixed;
+        width: 100%;
+        top: 0;
+        color:#fff;
+        display:flex;
+        justify-content:space-between;
+        transition:opacity 1s ease;
+      }
+      #control-panel {
+        background: rgba(0,0,0,0.5);
+        opacity: 0;
+        position: fixed;
+        width: 100%;
+        bottom: 0;
+        color:#fff;
+        display:flex;
+        justify-content:space-between;
+        transition:opacity 1s ease;
+      }
+      #control-panel:hover,#control-panel.open,#admin:hover,#admin.open{
+        opacity:1;
+      }
+      #scrubber-container, #scrubber{
+        width:100%;
+      }
+      #control-panel *, #admin a, #admin span{
+        color:#ddd;
+        text-decoration:none;
+        font-size:20px;
+        min-width:20px;
+        margin:0.5em;
+        padding:0.3em 0.7em;
+        border:solid 1px rgba(0,0,0,0.7);
+        border-radius:5px;
+        background:#222;
+      }
+      #mute.muted::after{
+        content:"🔇\FE0E";
+      }
+      #mute::after{
+        content:"🔊\FE0E";
+      }
+      #toggle-fullscreen::after{
+        content:"📺\FE0E";
+      }
     </style>
   </head>
   <body>
-    <video controls id="vid" type="video/mp4">
-    </video>
-    <ul id="messages"></ul>
-    <form action="">
-      <input id="m" autocomplete="off" /><button>Send</button>
-    </form>
-
+    <div id="vidcontainer">
+      <video id="vid" type="video/mp4">
+      </video>
+      <div id="admin" class="hidden">
+        <span>Admin controls:</span>
+        <a href="#" id="pause">||</a>
+        <a href="#" id="play">|></a>
+        <div id="scrubber-container">
+          <input id="scrubber" type="range" min="0" max="100" step="1"></input>
+        </div>
+      </div>
+      <div id="control-panel">
+        <a href="#" id="mute"></a>
+        <a href="#" id="sync">🔄&#xFE0E; sync</a>
+        <a href="#" id="buffered-sync">🔄&#xFE0E; buffered sync</a>
+        <a href="#" id="toggle-fullscreen"></a>
+      </div>
+    </div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://code.jquery.com/jquery-1.11.1.js"></script>
   <script>
+
+  // date sync test code
+
+  /*
+  var oldDateNow = Date.now
+  Date.now = function(){
+    return oldDateNow() + 10000;
+  }
+  */
 
     var video = $('#vid')[0];
     var socket = io();
@@ -69,24 +112,43 @@
     var trackedDuration = 0;
 
     // track the video
-
   $(function () {
+
+
+    // admin interface
+    if (window.location.search && window.location.search.indexOf('admin') > -1){
+      var $admin = $('#admin');
+      $admin.removeClass('hidden');
+      $('#pause').on('click',adminPause);
+      $('#play').on('click',adminPlay);
+    }
+
     $("#vid").on(
     "timeupdate",
     function(event){
       trackedTime = this.currentTime;
       trackedDuration = this.duration;
-      console.log(trackedTime);
+
+      var scrubber = $('#scrubber');
+      scrubber[0].min = 0;
+      scrubber[0].max = trackedDuration;
+      scrubber.val(trackedTime);
+
+      if (doEstimateUnpauseTime && lastSync.now){
+        var expectedPosition = lastSync.trackPosition + ( (lastSync.now- lastSyncBrowserTime) + Date.now() - lastSync.syncTime )/1000;
+        estimatedUnpauseTime += (expectedPosition - trackedTime);
+        doEstimateUnpauseTime = false;
+        willEstimateUnpauseTime = false;
+      }
+      var expectedPosition = lastSync.trackPosition + ( (lastSync.now- lastSyncBrowserTime) + Date.now() - lastSync.syncTime )/1000;
+      //console.log('time discrepancy: ' + (expectedPosition - trackedTime));
     });
 
-    $('form').submit(function(){
-      socket.emit('chat message', $('#m').val());
-      $('#m').val('');
-      return false;
+    $('#scrubber').on('change',function(e){
+      console.log(this.value);
+      adminSetTime(Number(this.value));
     });
-    socket.on('chat message', function(msg){
-      $('#messages').append($('<li>').text(msg));
-    });
+
     socket.on('sync',syncUpdate);
 
     fetch('/sync').then(res=>res.json()).then(json=>{
@@ -95,49 +157,173 @@
       alert(e);
     });
 
+    $('#mute').on('click',function(e){
+      this.classList.toggle('muted');
+      video.muted = !video.muted;
+    });
+
+    $('#sync').on('click',function(e){
+      doSync(0);
+    });
+    $('#buffered-sync').on('click',function(e){
+      doSync();
+    });
+    $('#toggle-fullscreen').on('click',toggleFullScreen);
+
+    var drawerTimeout = null;
+    function closeDrawer(){
+      $('#control-panel').removeClass('open');
+    }
+    $('#vid-container,#vid').on('click',function(e){
+      if (drawerTimeout){
+        clearTimeout(drawerTimeout);
+      }
+      $('#control-panel').addClass('open');
+      drawerTimeout = setTimeout(closeDrawer,3000);
+    });
+
+    // fullscreen stuff.  Yes, it's really this bad.
+
+    var isFullScreen = false;
+    document.addEventListener("fullscreenchange", function () {
+        isFullScreen = (document.fullscreen);
+    }, false);
+
+    document.addEventListener("mozfullscreenchange", function () {
+        isFullScreen = (document.mozFullScreen);
+    }, false);
+
+    document.addEventListener("webkitfullscreenchange", function () {
+        isFullScreen = (document.webkitIsFullScreen);
+    }, false);
+
+    document.addEventListener("msfullscreenchange", function () {
+        isFullScreen = (document.msFullscreenElement);
+    }, false);
+
+    function goFull(){
+      var docElm = document.documentElement;
+      if (docElm.requestFullscreen) {
+          docElm.requestFullscreen();
+      }
+      else if (docElm.mozRequestFullScreen) {
+          docElm.mozRequestFullScreen();
+      }
+      else if (docElm.webkitRequestFullScreen) {
+          docElm.webkitRequestFullScreen();
+      }
+      else if (docElm.msRequestFullscreen) {
+          docElm.msRequestFullscreen();
+      }
+    }
+    function exitFull(){
+      if (document.exitFullscreen) {
+          document.exitFullscreen();
+      }
+      else if (document.mozCancelFullScreen) {
+          document.mozCancelFullScreen();
+      }
+      else if (document.webkitCancelFullScreen) {
+          document.webkitCancelFullScreen();
+      }
+      else if (document.msExitFullscreen) {
+          document.msExitFullscreen();
+      }
+    }
+    function toggleFullScreen(){
+      isFullScreen?exitFull():goFull();
+    }
+
   });
 
     var currentSource = '';
     var syncing = false;
     var syncPosition = false;
-    var BUF_TIME = 1;
+    var BUF_TIME = 3;
     var lastSync = {};
+    var lastSyncBrowserTime = 0;
 
-    function doSync(bufTime){
-      if (syncing){return;}
-      var bufTime = (typeof bufTime == "number")?bufTime:BUF_TIME;
-      syncing = true;
-      var expectedPosition = lastSync.trackPosition + ( Date.now() - lastSync.syncTime )/1000;
-      syncPosition = expectedPosition;
+    var doEstimateUnpauseTime = false;
+    var willEstimateUnpauseTime = false;
+    var estimatedUnpauseTime = 0;
 
-      if (video.playing){
-        video.pause().then(playEventually);
+    var videoIsPlaying = true;
+
+    function getExpectedPosition(){
+      if (!lastSync.paused){
+        return lastSync.trackPosition + ( (lastSync.now- lastSyncBrowserTime) + Date.now() - lastSync.syncTime )/1000;
       }else{
-        playEventually();
-      }
-
-      function playEventually(){
-        // move track forward
-        video.currentTime = expectedPosition + bufTime;
-        // play in a bit
-        setTimeout(function(){
-          if (!video.playing){
-            video.play().then(function(){
-              syncing = false;
-            });
-          }
-        },bufTime*1000);
+        return lastSync.trackPosition;
       }
     }
+
+    function doSync(bufTime){
+      if ( ( videoIsPlaying != lastSync.paused ) && (syncing || doEstimateUnpauseTime || willEstimateUnpauseTime) ){
+        return;
+      }
+      var bufTime = (typeof bufTime == "number")?bufTime:BUF_TIME;
+      syncing = true;
+      var expectedPosition = getExpectedPosition();
+      syncPosition = expectedPosition;
+
+      if (bufTime === 0){
+        // move track forward
+        video.currentTime = expectedPosition;
+        if (!lastSync.paused){
+          video.play().then(function(){
+            videoIsPlaying = true;
+            syncing = false;
+            willEstimateUnpauseTime = true;
+            setTimeout(function(){// after unpausing, estimate the unpause time duration
+              doEstimateUnpauseTime = true;
+            },2000);
+          });
+        }else{
+          video.pause();
+          videoIsPlaying = false;
+          syncing = false;
+        }
+      }
+
+      else{
+        setTimeout(function(){// give 1 s to pause
+          video.currentTime = expectedPosition + bufTime;
+          setTimeout(function(){  // delay bufTime - unpauseTime - 1000
+            if (!lastSync.paused){// play
+              video.play().then(function(){
+                videoIsPlaying = true;
+                syncing = false;
+                willEstimateUnpauseTime = true;
+                setTimeout(function(){// after unpausing, estimate the unpause time duration
+                  doEstimateUnpauseTime = true;
+                },2000);
+              });
+            }else{// stay paused
+              video.pause();
+              videoIsPlaying = false;
+              syncing = false;
+            }
+          },(bufTime*1000 - 1000) - estimatedUnpauseTime*1000);
+        },1000);
+
+        video.pause();
+        videoIsPlaying = false;
+      }
+
+    }
+
     // update where the video is
     function syncUpdate(o){
       console.log(o);
       lastSync = o;
+      lastSyncBrowserTime = Date.now();
       /*
       {
         file:'',
         trackPosition:0,
-        syncTime:0
+        syncTime:0,
+        now: 0,
+        paused:false
       }
       */
       // sync filename
@@ -145,15 +331,47 @@
       if (o.file && currentSource !== o.file){
         currentSource = o.file;
         video.src = o.file;
+        doSync();
+        return;
       }
 
       // expected track position
-      var expectedPosition = o.trackPosition + ( Date.now() - o.syncTime )/1000 ;
-      console.log('expected: '+expectedPosition )
-      console.log('actual: '+trackedTime);
-      if ( Math.abs(expectedPosition - trackedTime) > BUF_TIME ){
+      var expectedPosition = getExpectedPosition();
+      //console.log('time discrepancy: ' + (expectedPosition - trackedTime));
+      if ( Math.abs(expectedPosition - trackedTime) > 1.0 ){
         doSync();
+        return;
       }
+
+      if (o.paused && videoIsPlaying){
+        doSync(0);
+      }else if (!o.paused && !videoIsPlaying){
+        doSync(0);
+      }
+
+    }
+
+    function adminPlay(){
+      sendAdminRequest({paused:false,trackPosition:trackedTime});
+    }
+    function adminPause(){
+      sendAdminRequest({paused:true,trackPosition:trackedTime});
+    }
+    function adminSetTime(t){
+      sendAdminRequest({trackPosition:t});
+    }
+    function sendAdminRequest(toSend){
+      fetch("/sync",
+      {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          method: "POST",
+          credentials:'include',
+          body: JSON.stringify(toSend)
+      })
+      .then(function(res){ console.log(res) })
+      .catch(function(res){ console.log(res) })
     }
 
   </script>

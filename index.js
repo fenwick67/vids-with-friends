@@ -5,9 +5,12 @@ var fileUpload = require('express-fileupload');
 var async = require('async');
 var bodyParser = require('body-parser')
 var session = require('express-session');
-var MemoryStore = require('session-memory-store')(session);
+var FileStore = require('session-file-store')(session);
 var passwordManager = require('./lib/password-manager');
 var LocalStrategy = require('passport-local').Strategy;
+var _ = require('lodash');
+var cookieParser = require('cookie-parser');
+
 
 // env vars
 // set these plus LOGINHASH using hash.js
@@ -23,15 +26,24 @@ var parseJsonBody = bodyParser.json({extended:false});
 app.use(serveStatic({root:'public'}));
 app.use(serveStatic({root:videoDir,'baseDir':'videos'}));
 
-
 /*
   stuff for passport
 */
+app.use(session({
+  name: 'JSESSION',
+  secret: sessionSecret,
+  store: new FileStore({
+    path:"./.sessions"
+  })
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+app.use(cookieParser());
 
 app.post('/login',
   parseFormBody,
   passport.authenticate('local', {
-    successRedirect: '/',
+    successRedirect: '/?admin',
     failureRedirect: '/login?failure',
     failureFlash: false
   }),function(req,res){
@@ -40,6 +52,7 @@ app.post('/login',
 );
 
 function ensureAuthenticated(req,res,next){
+  //console.log(req.user);
   if (req.isAuthenticated()){
     return next();
   }else{
@@ -48,7 +61,7 @@ function ensureAuthenticated(req,res,next){
   }
 }
 
-function ensureAuthenticated(req,res,next){
+function ensureAuthenticatedRedirect(req,res,next){
   if (req.isAuthenticated()){
     return next();
   }else{
@@ -79,19 +92,13 @@ passport.use(new LocalStrategy(
   }
 ));
 
-app.use(session({
-  name: 'JSESSION',
-  secret: sessionSecret,
-  store: new MemoryStore({})
-}));
-
 // socketio
 
 var server = require('http').createServer(app);
 var io = require('socket.io')(server);
 
 io.on('connection', function(socket){
-  console.log('a user connected');
+  //console.log('a user connected');
   socket.on('chat message', function(msg){
       io.emit('chat message', msg);
     });
@@ -185,36 +192,47 @@ app.delete('/admin/asset',ensureAuthenticated,function(req,res){
 
 */
 
-// sync file and time
+/*
+sync file and time
+ note that 'now' always returns latest datetime for sync
+ syncTime is the time the change happened
+ trackposition is track time in seconds when the change happened
+*/
 var sync = {
   file:'videos/bbb.mp4',
   trackPosition:0,
-  syncTime:Date.now()
+  paused:false,
+  syncTime:Date.now(),
+  get now(){
+    return Date.now()
+  }
 };
+
 function emitSync(){
   io.emit('sync',sync);
 }
-setInterval(emitSync,10000);
+setInterval(emitSync,5000);
 
 app.get('/sync',function(req,res){
   res.status(200);
   return res.json(sync);
 })
 
-app.post('/sync',parseJsonBody,ensureAuthenticated,function(req,res){
+// this is how the sync object is updated
+app.post('/sync',ensureAuthenticated,parseJsonBody,function(req,res){
 
-  if (!req.body || !req.body.file || !req.body.trackPosition || !req.body.syncTime){
+  if (!req.body){
     res.status(500);
-    res.send();
+    return res.send();
   }
 
-  sync.file = req.body.file;
-  sync.trackPosition = req.body.trackPosition;
-  sync.syncTime = req.body.syncTime;
+  _.assign(sync,req.body);
+  sync.syncTime = Date.now();
 
-  emitSync();
   res.status(200);
   res.send();
+
+  emitSync();
 });
 
 var port = process.env.PORT || 8080;
