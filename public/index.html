@@ -1,0 +1,161 @@
+<!doctype html>
+<head>
+    <title>Socket.IO chat</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body,html {
+        font: 13px Helvetica, Arial;
+        height:100%;
+        width:100%;
+      }
+      form {
+        background: #000;
+         padding: 3px;
+         position: fixed;
+         bottom: 0;
+         width: 100%;
+      }
+      form input {
+        border: 0;
+        padding: 10px;
+        width: 90%;
+        margin-right: .5%;
+      }
+      form button {
+       width: 9%;
+       background: rgb(130, 224, 255);
+       border: none;
+       padding: 10px;
+     }
+      #messages {
+       list-style-type: none;
+        margin: 0;
+        padding: 0;
+      }
+      #messages li {
+         padding: 5px 10px;
+       }
+      #messages li:nth-child(odd) {
+       background: #eee;
+      }
+      #vid{
+        width:100%;
+        height:100%;
+        max-height:100%;
+        max-width:100%;
+      }
+    </style>
+  </head>
+  <body>
+    <video controls id="vid" type="video/mp4">
+    </video>
+    <ul id="messages"></ul>
+    <form action="">
+      <input id="m" autocomplete="off" /><button>Send</button>
+    </form>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://code.jquery.com/jquery-1.11.1.js"></script>
+  <script>
+
+    var video = $('#vid')[0];
+    var socket = io();
+
+    var trackedTime = 0;
+    var trackedDuration = 0;
+
+    // track the video
+
+  $(function () {
+    $("#vid").on(
+    "timeupdate",
+    function(event){
+      trackedTime = this.currentTime;
+      trackedDuration = this.duration;
+      console.log(trackedTime);
+    });
+
+    $('form').submit(function(){
+      socket.emit('chat message', $('#m').val());
+      $('#m').val('');
+      return false;
+    });
+    socket.on('chat message', function(msg){
+      $('#messages').append($('<li>').text(msg));
+    });
+    socket.on('sync',syncUpdate);
+
+    fetch('/sync').then(res=>res.json()).then(json=>{
+      syncUpdate(json);
+    }).catch(e=>{
+      alert(e);
+    });
+
+  });
+
+    var currentSource = '';
+    var syncing = false;
+    var syncPosition = false;
+    var BUF_TIME = 1;
+    var lastSync = {};
+
+    function doSync(bufTime){
+      if (syncing){return;}
+      var bufTime = (typeof bufTime == "number")?bufTime:BUF_TIME;
+      syncing = true;
+      var expectedPosition = lastSync.trackPosition + ( Date.now() - lastSync.syncTime )/1000;
+      syncPosition = expectedPosition;
+
+      if (video.playing){
+        video.pause().then(playEventually);
+      }else{
+        playEventually();
+      }
+
+      function playEventually(){
+        // move track forward
+        video.currentTime = expectedPosition + bufTime;
+        // play in a bit
+        setTimeout(function(){
+          if (!video.playing){
+            video.play().then(function(){
+              syncing = false;
+            });
+          }
+        },bufTime*1000);
+      }
+    }
+    // update where the video is
+    function syncUpdate(o){
+      console.log(o);
+      lastSync = o;
+      /*
+      {
+        file:'',
+        trackPosition:0,
+        syncTime:0
+      }
+      */
+      // sync filename
+
+      if (o.file && currentSource !== o.file){
+        currentSource = o.file;
+        video.src = o.file;
+      }
+
+      // expected track position
+      var expectedPosition = o.trackPosition + ( Date.now() - o.syncTime )/1000 ;
+      console.log('expected: '+expectedPosition )
+      console.log('actual: '+trackedTime);
+      if ( Math.abs(expectedPosition - trackedTime) > BUF_TIME ){
+        doSync();
+      }
+    }
+
+  </script>
+
+</body>

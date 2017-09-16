@@ -1,0 +1,38 @@
+{
+  "name": "vids-with-friends",
+  "version": "1.0.0",
+  "description": "watch synchronized videos with friends over the internet",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fenwick67/vids-with-friends.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/fenwick67/vids-with-friends/issues"
+  },
+  "homepage": "https://github.com/fenwick67/vids-with-friends#readme",
+  "dependencies": {
+    "async": "^2.5.0",
+    "bcryptjs": "^2.4.3",
+    "body-parser": "^1.18.1",
+    "chalk": "^2.1.0",
+    "cookie-parser": "^1.4.3",
+    "ecstatic": "^3.0.0",
+    "express": "^4.15.4",
+    "express-fileupload": "^0.2.0",
+    "express-session": "^1.15.5",
+    "lodash": "^4.17.4",
+    "passport": "^0.4.0",
+    "passport-local": "^1.0.0",
+    "prompt": "^1.0.0",
+    "serve-static": "^1.12.4",
+    "session-memory-store": "^0.2.2",
+    "socket.io": "^2.0.3"
+  }
+}
